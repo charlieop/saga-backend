@@ -1,21 +1,123 @@
 from django.contrib import admin
-from .models import Applicant, ApplicationStatus, Interviewer
+from .models import Applicant, ApplicationStatus, Interviewer, InterviewScore
 from django.contrib import messages
+from django.utils import timezone
+from django.db.models import Q
 
+
+class ListInterviewScoreInline(admin.TabularInline):
+    model = InterviewScore
+    fk_name = "application"
+    fields = ["interviewer", "score", "comment"]
+    readonly_fields = ["interviewer", "score", "comment"]
+    can_delete = False
+    show_change_link = True
+    extra = 0
+    verbose_name = "查看面试评分"
+    verbose_name_plural = "查看面试评分"
+    
+    def has_add_permission(self, request, obj):
+        return False
+
+class AddInterviewScoreInline(admin.TabularInline):
+    model = InterviewScore
+    fk_name = "application"
+    extra = 0
+    fields = ["interviewer", "score", "comment"]
+    can_delete = False
+    max_num = 1
+    
+    verbose_name = "添加面试评分"
+    verbose_name_plural = "添加面试评分"
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        return queryset.none()
 
 # Register your models here.
-
 class ApplicantAdmin(admin.ModelAdmin):
     search_fields = ('name', 'school', 'major')
-    list_display = ('id', 'name', 'email', 'school', 'major', 'grade', 'first_choice', 'second_choice')
+    list_display = ('name', 'email', 'school', 'major', 'grade', 'first_choice', 'second_choice', 'id', 'src')
     list_filter = ('grade', 'first_choice', 'second_choice', 'src')
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+
+        if request.user.is_superuser:
+            return qs
+        query = Q()
+        depts = ("LAW", "IT", "LIA", "FIN",
+                 "PR", "HR", "CM", "TUT")
+        
+        for g in request.user.groups.all():
+            print(g.name)
+            if g.name in depts:
+                query.add(Q(first_choice=g.name), Q.OR)
+                query.add(Q(second_choice=g.name), Q.OR)
+            elif g.name == "ALL":
+                return qs
+        if len(query) == 0:
+            return qs.none()
+        return qs.filter(query)
     
 class ApplicationStatusAdmin(admin.ModelAdmin):
     search_fields = ('applicant', )
-    list_display = ('applicant', 'handle_by', 'status')
+    list_display = ('applicant','status', 'interview_time', 'writiing_task_score', 'avgInterviewScore', 'totalScore', 'handle_by',)
     list_filter = ('handle_by', 'status')
-    autocomplete_fields = ('applicant', 'interviewer')
-    actions = ['send_writing_task_email', 'send_interview_email', 'send_decision_email']
+    readonly_fields = ["writing_task_file", "writing_task_video_link"]
+    list_per_page = 30
+    fields = ["applicant", ("status", "handle_by"), "writing_task_ddl",
+              ("writing_task_file", "writing_task_video_link"),
+              ("interview_time", "interviewer", "interview_uploaded_to_feishu"),
+              ("writiing_task_score", "writing_task_comment"),
+              "remark"]
+    raw_id_fields = ('applicant', )
+    autocomplete_fields = ('interviewer', )
+    actions = ['send_writing_task_email','check_writing_task_expired', 'send_interview_email', 'send_decision_email', ]
+    
+    inlines = [
+        ListInterviewScoreInline,
+        AddInterviewScoreInline,
+    ]
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+
+        if request.user.is_superuser:
+            return qs
+        query = Q()
+        depts = ("LAW", "IT", "LIA", "FIN",
+                 "PR", "HR", "CM", "TUT")
+        
+        for g in request.user.groups.all():
+            print(g.name)
+            if g.name in depts:
+                query.add(Q(handle_by=g.name), Q.OR)
+            elif g.name == "ALL":
+                return qs        
+        if len(query) == 0:
+            return qs.none()
+        return qs.filter(query)
+    
+    
+    def get_readonly_fields(self, request, obj=None):
+        fields = super(ApplicationStatusAdmin, self).get_readonly_fields(request)
+        fields_to_add = ["handle_by", "applicant"]
+        if obj:
+            for f in fields_to_add:
+                if f in fields:
+                    continue
+                fields.append(f)
+        else:
+            for f in fields_to_add:
+                if f in fields:
+                    fields.remove(f)
+        return fields
+    
+    def get_actions(self, request):
+        actions = super(ApplicationStatusAdmin, self).get_actions(request)
+        if not request.user.has_perm('backend.send_decision_email'):
+            del actions["send_decision_email"]
+        return actions
     
     def send_writing_task_email(self, request, queryset):
         all_success = True
@@ -27,6 +129,14 @@ class ApplicationStatusAdmin(admin.ModelAdmin):
         else:
             self.message_user(request, "某些笔试邮件发送失败", level=messages.WARNING)
     send_writing_task_email.short_description = "向选择的申请发送笔试邮件"
+    
+    def check_writing_task_expired(self, request, queryset):
+        queryset.filter(status="WRTIING_TASK_EMAIL_SENT")\
+            .filter(writing_task_ddl__lt=timezone.now())\
+            .update(status="WRTIING_TASK_EXPIRED")
+        self.message_user(request, "已检查过期", level=messages.INFO)
+    check_writing_task_expired.short_description = "对选择的申请检查笔试过期"
+            
     
     def send_interview_email(self, request, queryset):
         all_success = True
@@ -57,8 +167,18 @@ class InterviewerAdmin(admin.ModelAdmin):
     search_fields = ('name', )
     list_display = ('name', 'department', "meeting_link")
     
+
+class InterviewScoreAdmin(admin.ModelAdmin):
+    search_fields = ('application', 'interviewer')
+    list_display = ('application', 'interviewer', 'score', 'comment')
+    list_filter = ('interviewer', )
+    fields = ['application', 'interviewer', 'score', 'comment']
+    readonly_fields = ['application', 'interviewer']
+    list_per_page = 30
+
 admin.site.register(Applicant, ApplicantAdmin)
 admin.site.register(ApplicationStatus, ApplicationStatusAdmin)
 admin.site.register(Interviewer, InterviewerAdmin)
+admin.site.register(InterviewScore, InterviewScoreAdmin)
 
 admin.site.disable_action('delete_selected')

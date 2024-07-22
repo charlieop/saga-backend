@@ -1,19 +1,20 @@
-from datetime import timedelta, datetime
+from datetime import timedelta
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
-from .email import send_email_with_no_reply, compose_writing_task_email
+from .email import *
 import uuid
+from django.utils import timezone
 
 
 DEPARTMENTS = [
-    ("TUT", "教学部"),
-    ("CM", "行研部"),
-    ("IT", "IT部"),
-    ("HR", "人事部"),
-    ("PR", "宣传部"),
-    ("FIN", "财务部"),
     ("LAW", "法务部"),
+    ("IT", "IT部"),
     ("LIA", "外联部"),
+    ("FIN", "财务部"),
+    ("PR", "宣传部"),
+    ("HR", "人事部"),
+    ("CM", "行研部"),
+    ("TUT", "教学部"),
     ("PRE", "主席团")
 ]
 
@@ -73,20 +74,23 @@ class Applicant(models.Model):
     modified_at = models.DateTimeField(auto_now=True, editable=False)
         
     class Meta:
-        verbose_name = "申请者"
-        verbose_name_plural = "申请者"
-        db_table = "申请人表"
+        verbose_name = "申请人信息"
+        verbose_name_plural = "申请人信息"
+        db_table = "申请人信息表"
         ordering = ["created_at"]
         
     def __str__(self):
         return self.name
-    
+
+
+
 class ApplicationStatus(models.Model):
     global DEPARTMENTS
 
     APPLICATION_STATUS = [
-        ("NEW_APPLICATION", "新申请"),
         ("WRTIING_TASK_EMAIL_SENT", "笔试邮件已发送"),
+        ("WRTIING_TASK_SUBMITTED", "笔试邮件已提交"),
+        ("WRITING_TASK_REVIEWED", "笔试已评阅"),
         ("INTERVIEW_PENDING", "等待面试"),
         ("INTERVIEW_EMAIL_SENT", "面试邮件已发送"),
         ("PENDING", "面试结束, 待确认"),
@@ -95,15 +99,16 @@ class ApplicationStatus(models.Model):
         ("INTERNAL_REJECTED", "决定拒绝"),
         ("ACCEPTED", "已发送录取通知"),
         ("REJECTED", "已发送拒绝通知"),
-        ("EXPIRED", "已过期"),
+        ("NEW_APPLICATION", "新申请"),
+        ("WRTIING_TASK_EXPIRED", "笔试已过期"),
     ]
     
     def user_directory_path(instance, filename):
         # file will be uploaded to MEDIA_ROOT/user_<id>/<filename>
-        return f"writing_test/user_{instance.applicant.id}/{instance.handle_by}-{filename}"
+        return f"writing_task/user_{instance.applicant.id}/{instance.handle_by}-{filename}"
     
     def calculate_ddl():
-        ddl_datetime = datetime.now() + timedelta(days=7)
+        ddl_datetime = timezone.now() + timedelta(days=7)
         return ddl_datetime.replace(hour=23, minute=59, second=59, microsecond=0)
     
     id = models.AutoField(primary_key=True)
@@ -119,22 +124,40 @@ class ApplicationStatus(models.Model):
     
     interview_time = models.DateTimeField(verbose_name="面试时间", blank=True, null=True)
     interviewer = models.ForeignKey("Interviewer", on_delete=models.SET_NULL, verbose_name="主面试官", blank=True, null=True)
+    interview_uploaded_to_feishu = models.BooleanField(verbose_name="面试记录已上传至飞书", default=False)
     
     writiing_task_score = models.FloatField(validators=[MinValueValidator(0.0), MaxValueValidator(100.0)], verbose_name="笔试总分", blank=True, null=True)
-    interview_score = models.FloatField(validators=[MinValueValidator(0.0), MaxValueValidator(100.0)], verbose_name="面试总分", blank=True, null=True)
-
+    avgInterviewScore = models.FloatField(validators=[MinValueValidator(0.0), MaxValueValidator(100.0)], verbose_name="面试平均", blank=True, null=True)
+    
     writing_task_comment = models.TextField(verbose_name="笔试备注", blank=True, null=True)
-    interview_comment = models.TextField(verbose_name="面试备注", blank=True, null=True)
+    remark = models.TextField(verbose_name="备注", blank=True, null=True)
     
     created_at = models.DateTimeField(auto_now_add=True, editable=False)
     modified_at = models.DateTimeField(auto_now=True, editable=False)
     
+    def update_avgInterviewScore(self):
+        interview_scores = self.interview_scores.all()
+        if interview_scores:
+            self.avgInterviewScore = sum(score.score for score in interview_scores) / len(interview_scores)
+        else:
+            self.avgInterviewScore = None
+    
+    @property
+    def totalScore(self):
+        if self.writiing_task_score is not None and self.avgInterviewScore is not None:
+            return self.writiing_task_score + self.avgInterviewScore
+        return None
+    totalScore.fget.short_description = "总分"
+    
     class Meta:
-        verbose_name = "申请状态"
-        verbose_name_plural = "申请状态"
-        db_table = "申请状态表"
-        ordering = ["created_at"]
+        verbose_name = "部门申请"
+        verbose_name_plural = "部门申请"
+        db_table = "部门申请表"
+        ordering = ["handle_by", "status", "created_at"]
         unique_together = ["applicant", "handle_by"]
+        permissions = [
+            ("send_decision_email", "可以发送结果通知邮件"),
+        ]
     
     def __str__(self):
         return f"{self.applicant.name} - {getDeptName(self.handle_by)}"
@@ -142,9 +165,11 @@ class ApplicationStatus(models.Model):
     def send_writing_task_email(self):
         if self.status != "NEW_APPLICATION":
             return False
+        self.writing_task_ddl = ApplicationStatus.calculate_ddl()
+        self.save()
         res = send_email_with_no_reply(self.applicant.email, "SAGA星光·第五期 -- 笔试邀请",
                                  compose_writing_task_email(self.applicant.id, self.applicant.name,
-                                                            self.handle_by, self.writing_task_ddl))
+                                                            self.handle_by, timezone.localtime(self.writing_task_ddl)))
         if res:
             self.status = "WRTIING_TASK_EMAIL_SENT"
             self.save()
@@ -154,18 +179,37 @@ class ApplicationStatus(models.Model):
     def send_interview_email(self):
         if self.status != "INTERVIEW_PENDING":
             return False
-        print(f"send email to interview: {self.applicant.email}")
-        return True
+        if self.interview_time is None or self.interviewer is None:
+            return False
+        res = send_email_with_no_reply(self.applicant.email, "SAGA星光·第五期 -- 面试邀请",
+                                 compose_interview_email(self.applicant.name, self.handle_by,
+                                                         timezone.localtime(self.interview_time), self.interviewer.meeting_link))
+        if res:
+            self.status = "INTERVIEW_EMAIL_SENT"
+            self.save()
+            return True
+        return False
     
     def send_decision_email(self):
         if self.status not in ["INTERNAL_ACCEPTED", "INTERNAL_REJECTED"]:
             return False
         if self.status == "INTERNAL_ACCEPTED":
-            print(f"send email to accept: {self.applicant.email}")
+            res = send_email_with_HR(self.applicant.email, "SAGA星光·第五期 -- 录取通知",
+                                     compose_accept_email(self.applicant.name, self.handle_by))
         else:
-            print(f"send email to reject: {self.applicant.email}")
-        return True
-    
+            res = send_email_with_HR(self.applicant.email, "SAGA星光·第五期 -- 拒绝通知",
+                                     compose_reject_email(self.applicant.name, self.handle_by))
+        if res:
+            if self.status == "INTERNAL_ACCEPTED":
+                self.status = "ACCEPTED"
+            else:
+                self.status = "REJECTED"
+            self.save()
+            return True
+        return False
+
+
+
 class Interviewer(models.Model):
     global DEPARTMENTS
     
@@ -176,10 +220,36 @@ class Interviewer(models.Model):
     meeting_link = models.URLField(verbose_name="面试链接", blank=False)
     
     class Meta:
-        verbose_name = "面试官"
-        verbose_name_plural = "面试官"
-        db_table = "面试官表"
+        verbose_name = "主面试官"
+        verbose_name_plural = "主面试官"
+        db_table = "主面试官表"
         ordering = ["department"]
     
     def __str__(self):
         return f"{self.name} - {getDeptName(self.department)}"
+
+
+
+class InterviewScore(models.Model):
+    id = models.AutoField(primary_key=True)
+    
+    application = models.ForeignKey("ApplicationStatus", on_delete=models.CASCADE, related_name="interview_scores", verbose_name="部门申请", blank=False)
+    interviewer = models.CharField(max_length=10, verbose_name="面试评分人", blank=False)
+    
+    score = models.FloatField(validators=[MinValueValidator(0.0), MaxValueValidator(100.0)], verbose_name="面试总分", blank=False)
+    comment = models.TextField(verbose_name="备注", blank=True, null=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True, editable=False)
+    modified_at = models.DateTimeField(auto_now=True, editable=False)
+    
+    class Meta:
+        verbose_name = "面试评分"
+        verbose_name_plural = "面试评分"
+        db_table = "面试评分表"
+        ordering = ["application", "interviewer"]
+        unique_together = ["application", "interviewer"]
+    
+    def __str__(self):
+        return f"{self.application.applicant.name} - {getDeptName(self.application.handle_by)} - {self.interviewer}"
+    
+

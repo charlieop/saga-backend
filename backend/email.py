@@ -303,7 +303,7 @@ def compose_writing_task_email(id, name, dept, ddl):
                   <br>
                   <span class="des-post">技术支持邮箱：</span><span class="highlight-thin">support@saga-xingguang.com</span>
                   <br>
-                  <span class="des-post">人事部邮箱：</span><span class="highlight-thin">human-resources@saga-xingguang.com</span>
+                  <span class="des-post">人事部邮箱：</span><span class="highlight-thin">human-resource@saga-xingguang.com</span>
                   </p>
                   <div class="signature-thin">
                     <p>顺颂，</p>
@@ -353,13 +353,33 @@ def compose_writing_task_email(id, name, dept, ddl):
 """
     return content
 
+def compose_interview_email(name, dept, time, link):
+    return f"""
+{name}你好,
+我们现在邀请你参加{code_to_dept[dept]}的面试.
+时间: {time}
+链接: {link}
+"""
+
+def compose_accept_email(name, dept):
+    return f"""
+{name}你好,
+我们很高兴地通知你, 你已经被{code_to_dept[dept]}录取.
+"""
+
+def compose_reject_email(name, dept):
+    return f"""
+{name}你好,
+我们很遗憾地通知你, 你没有被{code_to_dept[dept]}录取.
+"""
+
 
 def send_email_with_no_reply(to, subject, content) -> bool:
     try:
         sender = "no-reply@saga-xingguang.com"
         server = smtplib.SMTP('smtp.feishu.cn', 587)
         server.starttls()
-        server.login(sender, "PASSWORD_HERE")
+        server.login(sender, "PASSWORDHERE")
         
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -370,8 +390,39 @@ def send_email_with_no_reply(to, subject, content) -> bool:
         html_part = MIMEText(content, "html", "utf-8")
         msg.attach(html_part)
 
-        server.sendmail(sender, to, msg.as_string())
+        errs = server.sendmail(sender, to, msg.as_string())
         server.quit()
+        if errs:
+            print(errs)
+            return False
+        return True
+        
+    except Exception as e:
+        print(e)
+        return False
+      
+      
+def send_email_with_HR(to, subject, content) -> bool:
+    try:
+        sender = "human-resource@saga-xingguang.com"
+        server = smtplib.SMTP('smtp.feishu.cn', 587)
+        server.starttls()
+        server.login(sender, "PASSWORDHERE")
+        
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = sender
+        msg["To"] = to
+        msg["Reply-To"] = "human-resource@saga-xingguang.com"
+
+        html_part = MIMEText(content, "html", "utf-8")
+        msg.attach(html_part)
+
+        errs = server.sendmail(sender, to, msg.as_string())
+        server.quit()
+        if errs:
+            print(errs)
+            return False
         return True
         
     except Exception as e:

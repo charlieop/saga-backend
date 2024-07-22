@@ -1,5 +1,7 @@
 from rest_framework import serializers
 from .models import Applicant, ApplicationStatus
+from django.db.models import Q
+
 
 class CreateApplicantSerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,20 +24,11 @@ class WritingTaskSerializer(serializers.ModelSerializer):
     applications = serializers.SerializerMethodField()
     
     def get_applications(self, applicant):
-        from django.db.models import Q
         
-        queryset = applicant.applications.filter(Q(status="NEW_APPLICATION") | Q(status="WRTIING_TASK_EMAIL_SENT"))
+        queryset = applicant.applications.filter(Q(status="NEW_APPLICATION") | Q(status="WRTIING_TASK_EMAIL_SENT") | Q(status="WRTIING_TASK_SUBMITTED"))
         serializer = WritingTaskStatusSerializer(queryset, many=True)
         return serializer.data
     
     class Meta:
         model = Applicant
         fields = ["name", "applications"]
-
-
-class ApplicantSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Applicant
-        fields = "__all__"
-        # exclude = ("id", "created_at")
-        
