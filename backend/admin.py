@@ -4,8 +4,25 @@ from django.contrib import messages
 from django.utils import timezone
 from django.db.models import Q
 
+from unfold.admin import ModelAdmin, TabularInline
 
-class ListInterviewScoreInline(admin.TabularInline):
+# to make the user and group use Unfold's UserAdmin and GroupAdmin
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin
+from django.contrib.auth.models import User, Group
+
+admin.site.unregister(User)
+admin.site.unregister(Group)
+@admin.register(User)
+class UserAdmin(BaseUserAdmin, ModelAdmin):
+    pass
+
+@admin.register(Group)
+class GroupAdmin(BaseGroupAdmin, ModelAdmin):
+    pass
+
+
+class ListInterviewScoreInline(TabularInline):
     model = InterviewScore
     fk_name = "application"
     fields = ["interviewer", "score", "comment"]
@@ -19,7 +36,7 @@ class ListInterviewScoreInline(admin.TabularInline):
     def has_add_permission(self, request, obj):
         return False
 
-class AddInterviewScoreInline(admin.TabularInline):
+class AddInterviewScoreInline(TabularInline):
     model = InterviewScore
     fk_name = "application"
     extra = 0
@@ -34,7 +51,7 @@ class AddInterviewScoreInline(admin.TabularInline):
         return queryset.none()
 
 # Register your models here.
-class ApplicantAdmin(admin.ModelAdmin):
+class ApplicantAdmin(ModelAdmin):
     search_fields = ('name', 'school', 'major')
     list_display = ('name', 'email', 'school', 'major', 'grade', 'first_choice', 'second_choice', 'id', 'src')
     list_filter = ('grade', 'first_choice', 'second_choice', 'src')
@@ -59,7 +76,7 @@ class ApplicantAdmin(admin.ModelAdmin):
             return qs.none()
         return qs.filter(query)
     
-class ApplicationStatusAdmin(admin.ModelAdmin):
+class ApplicationStatusAdmin(ModelAdmin):
     search_fields = ('applicant', )
     list_display = ('applicant','status', 'interview_time', 'writiing_task_score', 'avgInterviewScore', 'totalScore', 'handle_by',)
     list_filter = ('handle_by', 'status')
@@ -67,7 +84,7 @@ class ApplicationStatusAdmin(admin.ModelAdmin):
     list_per_page = 30
     fields = ["applicant", ("status", "handle_by"), "writing_task_ddl",
               ("writing_task_file", "writing_task_video_link"),
-              ("interview_time", "interviewer", "interview_uploaded_to_feishu"),
+              "interview_time", ("interviewer", "interview_uploaded_to_feishu"),
               ("writiing_task_score", "writing_task_comment"),
               "remark"]
     raw_id_fields = ('applicant', )
@@ -163,12 +180,12 @@ class ApplicationStatusAdmin(admin.ModelAdmin):
     send_decision_email.short_description = "向选择的申请发送录取/拒绝邮件"
     
     
-class InterviewerAdmin(admin.ModelAdmin):
+class InterviewerAdmin(ModelAdmin):
     search_fields = ('name', )
     list_display = ('name', 'department', "meeting_link")
     
 
-class InterviewScoreAdmin(admin.ModelAdmin):
+class InterviewScoreAdmin(ModelAdmin):
     search_fields = ('application', 'interviewer')
     list_display = ('application', 'interviewer', 'score', 'comment')
     list_filter = ('interviewer', )

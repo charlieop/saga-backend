@@ -41,10 +41,32 @@ CORS_ALLOW_METHODS = (
  'VIEW',
 )
 
+UNFOLD = {
+    "SITE_TITLE": "SAGA 管理后台",
+    "SITE_HEADER": "SAGA星光-招募管理后台",
+    "SITE_SYMBOL": "settings",  # symbol from icon set
+    "COLORS": {
+        "primary": {
+            "50": "255 248 235",
+            "100": "255 236 207",
+            "200": "255 217 164",
+            "300": "255 192 115",
+            "400": "255 160 66",
+            "500": "255 168 37",
+            "600": "230 129 29",
+            "700": "204 99 22",
+            "800": "179 73 18",
+            "900": "153 51 14",
+            "950": "128 34 10"
+        }
+    },
+}
+
 
 # Application definition
 
 INSTALLED_APPS = [
+    'unfold',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
