@@ -70,9 +70,13 @@ def file_detail(request, pk, format=None):
         
         if serializer.is_valid():
             serializer.save()
+            application.status = "WRTIING_TASK_SUBMITTED"
+            application.save()
             return Response(request.data.get("writing_task_file").name, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     elif request.method == "DELETE":
         application.writing_task_file.delete()
+        application.status = "WRTIING_TASK_EMAIL_SENT"
+        application.save()
         return Response(status=status.HTTP_204_NO_CONTENT)

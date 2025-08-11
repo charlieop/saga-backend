@@ -362,13 +362,12 @@ def compose_writing_task_email(id, name, dept, ddl):
 """
     return content
 
-
 def send_email_with_no_reply(to, subject, content) -> bool:
     try:
         sender = "no-reply@saga-xingguang.com"
         server = smtplib.SMTP('smtp.feishu.cn', 587)
         server.starttls()
-        server.login(sender, "PASSWORD_HERE")
+        server.login(sender, "PASSWORDHERE")
         
         msg = MIMEMultipart("alternative")
         msg["Subject"] = "【SAGA】2024-2025年度志愿者招募笔试邀请函"
